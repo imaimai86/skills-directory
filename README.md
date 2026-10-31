@@ -45,9 +45,29 @@ Manage and synchronize your AI agent skills from a single canonical repository, 
 
 ## Quick Start
 
-### Interactive Mode (with Preview & Confirmation)
-Run without arguments to launch the interactive terminal selector:
+### Quick Run Options
 
+#### Option A: Direct Command (On This Machine)
+Because the package is linked locally on your system:
+```bash
+skills-directory
+# or with flags:
+skills-directory --skills=all --agents=all --yes
+```
+
+#### Option B: Via GitHub Directly (Any Machine, Zero Setup)
+Run directly from the GitHub repository without needing npm registry publication:
+```bash
+npx -y github:imaimai86/skills-directory
+# or with flags:
+npx -y github:imaimai86/skills-directory --skills=all --agents=all --yes
+```
+
+#### Option C: Via NPM Registry (Once Published)
+To make `npx @imaimai86/skills-directory` work globally:
+1. Log in: `npm login`
+2. Publish: `npm publish --access public`
+3. Run anywhere:
 ```bash
 npx @imaimai86/skills-directory
 ```
