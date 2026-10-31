@@ -10,6 +10,7 @@ import {
   PERSISTENT_STORE,
   getCanonicalSource,
   copySkillToStore,
+  checkSkillConflict,
   linkSkill,
   unlinkSkill,
   inspectAgentSkills
@@ -280,6 +281,31 @@ async function main() {
   }
   console.log(`${ANSI.bold}Source Mode:${ANSI.reset} ${canonicalSource.type === 'repo' ? 'Direct Git Repo' : 'Persistent Store (~/.agents/skills)'}`);
   console.log(`${ANSI.bold}Source Path:${ANSI.reset} ${ANSI.dim}${canonicalSource.baseDir}${ANSI.reset}`);
+
+  // Check for any existing skill conflicts across target agents
+  const conflicts = [];
+  for (const agentKey of selectedAgentKeys) {
+    for (const skillId of selectedSkillIds) {
+      const skillPath = path.join(canonicalSource.baseDir, skillId);
+      const conf = await checkSkillConflict(skillId, skillPath, agentKey);
+      if (conf.hasConflict) {
+        conflicts.push({ agentKey, skillId, conf });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    console.log(`\n${ANSI.yellow}${ANSI.bold}⚠️  Existing Skill Conflicts Detected (${conflicts.length}):${ANSI.reset}`);
+    for (const c of conflicts) {
+      const typeStr = c.conf.type === 'directory'
+        ? 'local folder'
+        : c.conf.type === 'symlink'
+          ? `existing symlink -> ${c.conf.currentTarget}`
+          : 'file';
+      console.log(`  • ${ANSI.bold}${c.skillId}${ANSI.reset} in ${AGENTS[c.agentKey].name} (${ANSI.dim}${typeStr}${ANSI.reset})`);
+    }
+    console.log(`  ${ANSI.dim}Existing folders will be safely backed up (*.backup.<timestamp>) if replaced.${ANSI.reset}`);
+  }
   console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}\n`);
 
   // USER CONFIRMATION STEP
@@ -312,7 +338,22 @@ async function main() {
 
     for (const skillId of selectedSkillIds) {
       const skillPath = path.join(canonicalSource.baseDir, skillId);
-      const result = await linkSkill(skillId, skillPath, agentKey, { dryRun });
+      const conflict = await checkSkillConflict(skillId, skillPath, agentKey);
+
+      let replace = true;
+      if (conflict.hasConflict) {
+        const typeStr = conflict.type === 'directory' ? 'folder' : 'symlink';
+        if (!skipConfirm && !dryRun) {
+          replace = await confirm(`Skill "${skillId}" already exists in ${agent.name} (${typeStr}). Replace and backup?`, false);
+        }
+      }
+
+      if (!replace) {
+        console.log(`  ${ANSI.yellow}• Kept existing:${ANSI.reset} ${skillId} (replacement declined)`);
+        continue;
+      }
+
+      const result = await linkSkill(skillId, skillPath, agentKey, { dryRun, replace: true });
 
       if (result.status === 'linked') {
         console.log(`  ${ANSI.green}✓ Linked:${ANSI.reset} ${skillId} -> ${ANSI.dim}${result.target}${ANSI.reset}`);

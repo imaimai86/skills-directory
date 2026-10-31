@@ -9,6 +9,7 @@ import {
   AGENTS,
   linkSkill,
   unlinkSkill,
+  checkSkillConflict,
   getCanonicalSource
 } from '../lib/linker.js';
 
@@ -117,4 +118,54 @@ test('linkSkill enforces protected path safeguard', async () => {
   const resCodex = await linkSkill('.system', '/tmp/fake', 'codex');
   assert.equal(resCodex.status, 'skipped');
   assert.equal(resCodex.reason, 'protected path');
+});
+
+test('checkSkillConflict and conditional replacement with backup', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-conflict-test-'));
+  try {
+    const originalClaudePath = AGENTS.claude.path;
+    AGENTS.claude.path = tmpDir;
+
+    const sourceSkill = path.join(ROOT, 'skills', 'deepen');
+    const existingSkillDir = path.join(tmpDir, 'deepen');
+
+    // Create a pre-existing physical directory
+    await fs.mkdir(existingSkillDir);
+    await fs.writeFile(path.join(existingSkillDir, 'SKILL.md'), 'pre-existing custom content');
+
+    // Conflict check should detect directory
+    const conflict = await checkSkillConflict('deepen', sourceSkill, 'claude');
+    assert.equal(conflict.hasConflict, true);
+    assert.equal(conflict.type, 'directory');
+
+    // Linking with replace: false should skip and preserve content
+    const skipRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: false });
+    assert.equal(skipRes.status, 'skipped');
+    const preservedContent = await fs.readFile(path.join(existingSkillDir, 'SKILL.md'), 'utf-8');
+    assert.equal(preservedContent, 'pre-existing custom content');
+
+    // Linking with replace: true should back up and create symlink
+    const replaceRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: true });
+    assert.equal(replaceRes.status, 'replaced-dir');
+    assert.ok(replaceRes.backupPath);
+
+    // Verify backup file exists with original content
+    const backupContent = await fs.readFile(path.join(replaceRes.backupPath, 'SKILL.md'), 'utf-8');
+    assert.equal(backupContent, 'pre-existing custom content');
+
+    // Verify destination is now a symlink pointing to sourceSkill
+    const lstat = await fs.lstat(existingSkillDir);
+    assert.ok(lstat.isSymbolicLink());
+    const target = await fs.readlink(existingSkillDir);
+    assert.equal(path.resolve(target), path.resolve(sourceSkill));
+
+    // Conflict check now reports alreadyLinked
+    const conflictAfter = await checkSkillConflict('deepen', sourceSkill, 'claude');
+    assert.equal(conflictAfter.hasConflict, false);
+    assert.equal(conflictAfter.alreadyLinked, true);
+
+    AGENTS.claude.path = originalClaudePath;
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
 });

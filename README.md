@@ -201,9 +201,9 @@ If you cloned this repository locally (e.g. `/Volumes/Work/Projects/claude-code/
        (Claude Code)   (Antigravity)       (Codex)
 ```
 
+- **Conflict Detection & Confirmation**: If a skill with the same name already exists in an agent path (as a physical folder or differing symlink), the CLI detects it and asks for explicit confirmation: `Skill "<name>" already exists. Replace and backup? (y/N)`. Declining keeps the existing skill intact.
+- **Automatic Timestamped Backups**: When an existing skill folder is replaced, it is never destroyed—it is safely moved to `<name>.backup.<timestamp>` before creating the symlink, ensuring zero data loss.
 - **No Broken NPM Caches**: When installed via `npx`, skills are persisted in `~/.agents/skills/` before linking so symlinks survive cache purges.
-- **Protected Paths**: `~/.claude/skills/synced` (Claude cloud sync) and `~/.codex/skills/.system` (Codex system skills) are protected and will never be overwritten, unlinked, or traversed.
-- **Automatic Backups**: If an agent directory already contains physical files for a skill, they are renamed to `*.backup.<timestamp>` before creating the symlink, guaranteeing zero data loss.
 
 ---
 
