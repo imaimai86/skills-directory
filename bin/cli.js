@@ -14,7 +14,7 @@ import {
   unlinkSkill,
   inspectAgentSkills
 } from '../lib/linker.js';
-import { multiSelect } from '../lib/prompt.js';
+import { multiSelect, confirm } from '../lib/prompt.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +54,7 @@ ${ANSI.bold}OPTIONS:${ANSI.reset}
   -s, --status                Show current installation/symlink status across all agents
   -d, --dry-run               Simulate actions without making filesystem modifications
   -u, --unlink                Unlink selected skills from selected agent paths
+  -y, --yes                   Skip confirmation prompt and proceed immediately
       --skills=<list|all>     Comma-separated list of skill IDs (or 'all')
       --agents=<list|all>     Target agent runtimes: claude, agy, codex (or 'all')
       --store=<repo|persist>  Force source store: 'repo' (direct symlink) or 'persist' (~/.agents/skills)
@@ -61,14 +62,14 @@ ${ANSI.bold}OPTIONS:${ANSI.reset}
   -v, --version               Display version information
 
 ${ANSI.bold}EXAMPLES:${ANSI.reset}
-  ${ANSI.gray}# Interactive selection:${ANSI.reset}
+  ${ANSI.gray}# Interactive selection with confirmation:${ANSI.reset}
   npx @imaimai86/skills-directory
 
   ${ANSI.gray}# Link all skills to Claude Code and Antigravity:${ANSI.reset}
   npx @imaimai86/skills-directory --skills=all --agents=claude,agy
 
-  ${ANSI.gray}# Link specific skills to all agents:${ANSI.reset}
-  npx @imaimai86/skills-directory --skills=deepen,grill-me,write-a-prd --agents=all
+  ${ANSI.gray}# Link specific skills without confirmation prompt:${ANSI.reset}
+  npx @imaimai86/skills-directory --skills=deepen,grill-me --agents=all --yes
 
   ${ANSI.gray}# Check status of installed agent skills:${ANSI.reset}
   npx @imaimai86/skills-directory --status
@@ -87,6 +88,7 @@ async function main() {
       status: { type: 'boolean', short: 's' },
       'dry-run': { type: 'boolean', short: 'd' },
       unlink: { type: 'boolean', short: 'u' },
+      yes: { type: 'boolean', short: 'y' },
       skills: { type: 'string' },
       agents: { type: 'string' },
       store: { type: 'string' }
@@ -212,6 +214,7 @@ async function main() {
 
   const dryRun = Boolean(values['dry-run']);
   const isUnlink = Boolean(values.unlink);
+  const skipConfirm = Boolean(values.yes);
 
   if (dryRun) {
     console.log(`${ANSI.yellow}${ANSI.bold}[DRY RUN MODE]${ANSI.reset} No disk modifications will occur.\n`);
@@ -219,7 +222,21 @@ async function main() {
 
   // Handle Unlink
   if (isUnlink) {
-    console.log(`${ANSI.bold}Unlinking ${selectedSkillIds.length} skill(s) from ${selectedAgentKeys.length} agent(s)...${ANSI.reset}\n`);
+    console.log(`\n${ANSI.bold}${ANSI.red}Review skills to unlink:${ANSI.reset}`);
+    for (const id of selectedSkillIds) {
+      console.log(`  • ${ANSI.bold}${id}${ANSI.reset}`);
+    }
+    console.log(`Target agents: ${selectedAgentKeys.map(k => AGENTS[k].name).join(', ')}\n`);
+
+    if (!skipConfirm && !dryRun) {
+      const proceed = await confirm('Are you sure you want to unlink these skills?', false);
+      if (!proceed) {
+        console.log(`${ANSI.yellow}Unlink aborted by user.${ANSI.reset}`);
+        return;
+      }
+    }
+
+    console.log(`\n${ANSI.bold}Unlinking ${selectedSkillIds.length} skill(s) from ${selectedAgentKeys.length} agent(s)...${ANSI.reset}\n`);
     for (const agentKey of selectedAgentKeys) {
       for (const skillId of selectedSkillIds) {
         const result = await unlinkSkill(skillId, agentKey, { dryRun });
@@ -240,8 +257,40 @@ async function main() {
   const preferPersistent = values.store === 'persist';
   const canonicalSource = await getCanonicalSource(PACKAGE_ROOT, preferPersistent);
 
-  console.log(`${ANSI.cyan}Source mode:${ANSI.reset} ${canonicalSource.type === 'repo' ? 'Direct Git Repo' : 'Persistent Store (~/.agents/skills)'}`);
-  console.log(`${ANSI.cyan}Base directory:${ANSI.reset} ${canonicalSource.baseDir}\n`);
+  // DISPLAY SKILL DETAILS & SUMMARY BEFORE SETTING UP
+  console.log(`\n${ANSI.bold}${ANSI.cyan}📦 Planned Skills Installation Summary:${ANSI.reset}`);
+  console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}`);
+  
+  const selectedSkillsData = availableSkills.filter(s => selectedSkillIds.includes(s.id));
+  for (const skill of selectedSkillsData) {
+    console.log(`  ${ANSI.bold}${ANSI.green}• ${skill.id}${ANSI.reset}`);
+    // Wrap description cleanly
+    const cleanDesc = skill.description.replace(/\n+/g, ' ').trim();
+    console.log(`    ${ANSI.gray}${cleanDesc}${ANSI.reset}`);
+    if (skill.argumentHint) {
+      console.log(`    ${ANSI.yellow}Hint:${ANSI.reset} ${ANSI.gray}${skill.argumentHint}${ANSI.reset}`);
+    }
+  }
+
+  console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}`);
+  console.log(`${ANSI.bold}Target Coding Agents (${selectedAgentKeys.length}):${ANSI.reset}`);
+  for (const agentKey of selectedAgentKeys) {
+    const agent = AGENTS[agentKey];
+    console.log(`  • ${ANSI.cyan}${agent.name}${ANSI.reset} (${ANSI.dim}${agent.path}${ANSI.reset})`);
+  }
+  console.log(`${ANSI.bold}Source Mode:${ANSI.reset} ${canonicalSource.type === 'repo' ? 'Direct Git Repo' : 'Persistent Store (~/.agents/skills)'}`);
+  console.log(`${ANSI.bold}Source Path:${ANSI.reset} ${ANSI.dim}${canonicalSource.baseDir}${ANSI.reset}`);
+  console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}\n`);
+
+  // USER CONFIRMATION STEP
+  if (!skipConfirm && !dryRun) {
+    const proceed = await confirm('Proceed with setting up and symlinking these skills?', true);
+    if (!proceed) {
+      console.log(`\n${ANSI.yellow}Setup cancelled by user. No changes were made.${ANSI.reset}\n`);
+      return;
+    }
+    console.log();
+  }
 
   // If using persistent store mode, ensure canonical skills are synced to ~/.agents/skills
   if (canonicalSource.type === 'persistent') {
