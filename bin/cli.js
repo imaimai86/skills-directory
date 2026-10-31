@@ -202,7 +202,7 @@ async function main() {
         id: k,
         label: `${v.name}`,
         hint: v.path,
-        selected: true
+        selected: false
       }));
       selectedAgentKeys = await multiSelect('Select coding agents to symlink into', agentItems);
       if (selectedAgentKeys.length === 0) {
