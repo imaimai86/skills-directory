@@ -1,0 +1,42 @@
+{
+  "name": "@imaimai86/skills-directory",
+  "version": "0.1.0",
+  "description": "Multi-agent skill directory and cross-runtime symlink manager for Claude Code, Antigravity (AGY), and Codex",
+  "type": "module",
+  "main": "./bin/cli.js",
+  "bin": {
+    "skills-directory": "./bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node ./bin/cli.js",
+    "sync": "node ./bin/cli.js --skills=all --agents=all",
+    "status": "node ./bin/cli.js --status",
+    "test": "node --test test/cli.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imaimai86/skills-directory.git"
+  },
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "antigravity",
+    "agy",
+    "codex",
+    "ai-agent",
+    "skills",
+    "dotfiles"
+  ],
+  "author": "imaimai86",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
