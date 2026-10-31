@@ -188,7 +188,7 @@ async function main() {
         id: s.id,
         label: s.id,
         hint: s.description.slice(0, 60) + '...',
-        selected: true
+        selected: false
       }));
       selectedSkillIds = await multiSelect('Select skills to install', skillItems);
       if (selectedSkillIds.length === 0) {
