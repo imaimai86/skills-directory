@@ -18,16 +18,21 @@ const ROOT = path.resolve(__dirname, '..');
 
 test('scanSkills detects all canonical skills with frontmatter', async () => {
   const skills = await scanSkills(path.join(ROOT, 'skills'));
-  assert.ok(skills.length >= 10, `Expected at least 10 skills, found ${skills.length}`);
+  assert.equal(skills.length, 4, `Expected exactly 4 curated skills, found ${skills.length}`);
   
   const deepen = skills.find(s => s.id === 'deepen');
   assert.ok(deepen, 'deepen skill should exist');
   assert.equal(deepen.name, 'deepen');
   assert.ok(deepen.description.includes('Turn a goal into a deeper'));
 
-  const grillMe = skills.find(s => s.id === 'grill-me');
-  assert.ok(grillMe, 'grill-me skill should exist');
-  assert.ok(grillMe.description.includes('Interview the user relentlessly'));
+  const findContacts = skills.find(s => s.id === 'linkedin-find-contacts');
+  assert.ok(findContacts, 'linkedin-find-contacts skill should exist');
+
+  const jobApply = skills.find(s => s.id === 'linkedin-job-apply');
+  assert.ok(jobApply, 'linkedin-job-apply skill should exist');
+
+  const sendConnections = skills.find(s => s.id === 'linkedin-send-connections');
+  assert.ok(sendConnections, 'linkedin-send-connections skill should exist');
 });
 
 test('getCanonicalSource identifies local git repository', async () => {
