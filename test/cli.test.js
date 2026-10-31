@@ -120,8 +120,9 @@ test('linkSkill enforces protected path safeguard', async () => {
   assert.equal(resCodex.reason, 'protected path');
 });
 
-test('checkSkillConflict and conditional replacement with backup', async () => {
+test('checkSkillConflict and conditional replacement with backup to dedicated directory', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-conflict-test-'));
+  const tmpBackupDir = await fs.mkdtemp(path.join(os.tmpdir(), 'skills-backup-test-'));
   try {
     const originalClaudePath = AGENTS.claude.path;
     AGENTS.claude.path = tmpDir;
@@ -139,15 +140,16 @@ test('checkSkillConflict and conditional replacement with backup', async () => {
     assert.equal(conflict.type, 'directory');
 
     // Linking with replace: false should skip and preserve content
-    const skipRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: false });
+    const skipRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: false, backupRoot: tmpBackupDir });
     assert.equal(skipRes.status, 'skipped');
     const preservedContent = await fs.readFile(path.join(existingSkillDir, 'SKILL.md'), 'utf-8');
     assert.equal(preservedContent, 'pre-existing custom content');
 
     // Linking with replace: true should back up and create symlink
-    const replaceRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: true });
+    const replaceRes = await linkSkill('deepen', sourceSkill, 'claude', { replace: true, backupRoot: tmpBackupDir });
     assert.equal(replaceRes.status, 'replaced-dir');
     assert.ok(replaceRes.backupPath);
+    assert.ok(replaceRes.backupPath.startsWith(tmpBackupDir), 'Backup should be stored under dedicated backupRoot');
 
     // Verify backup file exists with original content
     const backupContent = await fs.readFile(path.join(replaceRes.backupPath, 'SKILL.md'), 'utf-8');
@@ -167,5 +169,6 @@ test('checkSkillConflict and conditional replacement with backup', async () => {
     AGENTS.claude.path = originalClaudePath;
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpBackupDir, { recursive: true, force: true });
   }
 });

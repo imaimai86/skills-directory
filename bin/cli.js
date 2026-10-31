@@ -304,7 +304,7 @@ async function main() {
           : 'file';
       console.log(`  • ${ANSI.bold}${c.skillId}${ANSI.reset} in ${AGENTS[c.agentKey].name} (${ANSI.dim}${typeStr}${ANSI.reset})`);
     }
-    console.log(`  ${ANSI.dim}Existing folders will be safely backed up (*.backup.<timestamp>) if replaced.${ANSI.reset}`);
+    console.log(`  ${ANSI.dim}Existing folders will be safely backed up to ~/.agents/backups/<agent>/ if replaced.${ANSI.reset}`);
   }
   console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}\n`);
 

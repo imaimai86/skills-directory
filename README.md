@@ -202,7 +202,7 @@ If you cloned this repository locally (e.g. `/Volumes/Work/Projects/claude-code/
 ```
 
 - **Conflict Detection & Confirmation**: If a skill with the same name already exists in an agent path (as a physical folder or differing symlink), the CLI detects it and asks for explicit confirmation: `Skill "<name>" already exists. Replace and backup? (y/N)`. Declining keeps the existing skill intact.
-- **Automatic Timestamped Backups**: When an existing skill folder is replaced, it is never destroyed—it is safely moved to `<name>.backup.<timestamp>` before creating the symlink, ensuring zero data loss.
+- **Dedicated External Backups**: When an existing skill folder is replaced, it is safely moved to a dedicated directory outside of all agent discovery paths (`~/.agents/backups/<agent>/<skill>-<timestamp>/`). Because it lives outside `skills/`, agents will never scan or load backup files as active skills.
 - **No Broken NPM Caches**: When installed via `npx`, skills are persisted in `~/.agents/skills/` before linking so symlinks survive cache purges.
 
 ---
