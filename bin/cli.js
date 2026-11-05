@@ -15,6 +15,13 @@ import {
   unlinkSkill,
   inspectAgentSkills
 } from '../lib/linker.js';
+import {
+  KNOWN_AGENTS,
+  discoverAgentSkills,
+  findSkill,
+  backupAndPushSkill,
+  resolveSource
+} from '../lib/backup-push.js';
 import { multiSelect, confirm } from '../lib/prompt.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,18 +51,33 @@ async function getPackageVersion() {
 
 function printHelp() {
   console.log(`
-${ANSI.bold}${ANSI.cyan}skills-directory${ANSI.reset} - Multi-agent skill manager for Claude Code, Antigravity, and Codex
+${ANSI.bold}${ANSI.cyan}skills-directory${ANSI.reset} - Multi-agent skill manager for Claude Code, Antigravity, Codex & more
 
 ${ANSI.bold}USAGE:${ANSI.reset}
-  npx @imaimai86/skills-directory [OPTIONS]
-  skills-directory [OPTIONS]
+  skills-directory [COMMAND] [OPTIONS]
+  npx @imaimai86/skills-directory [COMMAND] [OPTIONS]
+
+${ANSI.bold}COMMANDS:${ANSI.reset}
+  push, backup [SKILL]        Backup, import, relink, and push a skill to repo from any agent
+  sync                        Sync all canonical skills to all supported agents
+  status                      Show current installation and symlink status across agents
+  unlink                      Unlink selected skills from selected agent paths
+  list                        List all available canonical skills in repo
 
 ${ANSI.bold}OPTIONS:${ANSI.reset}
-  -l, --list                  List all available canonical skills with descriptions
+  -f, --from=<agent|path>     Source agent (claude, agy, codex, cursor, etc.) or custom folder path
+      --skill=<name>          Skill identifier to backup and push
+  -m, --message=<msg>         Custom git commit message
+      --no-push               Backup, import, and commit locally without pushing to git remote
+      --no-symlink            Keep original source in agent without replacing with symlink to repo
+  -a, --all                   Process all discovered skills across agents
   -s, --status                Show current installation/symlink status across all agents
-  -d, --dry-run               Simulate actions without making filesystem modifications
+  -l, --list                  List all available canonical skills with descriptions
   -u, --unlink                Unlink selected skills from selected agent paths
-  -y, --yes                   Skip confirmation prompt and proceed immediately
+  -p, --push                  Trigger backup and push workflow
+  -b, --backup                Alias for --push
+  -d, --dry-run               Simulate actions without making filesystem or git modifications
+  -y, --yes                   Skip interactive confirmation prompts
       --skills=<list|all>     Comma-separated list of skill IDs (or 'all')
       --agents=<list|all>     Target agent runtimes: claude, agy, codex (or 'all')
       --store=<repo|persist>  Force source store: 'repo' (direct symlink) or 'persist' (~/.agents/skills)
@@ -63,25 +85,215 @@ ${ANSI.bold}OPTIONS:${ANSI.reset}
   -v, --version               Display version information
 
 ${ANSI.bold}EXAMPLES:${ANSI.reset}
-  ${ANSI.gray}# Interactive selection with confirmation:${ANSI.reset}
-  npx @imaimai86/skills-directory
+  ${ANSI.gray}# Backup and push a skill from Claude Code to repository and git:${ANSI.reset}
+  skills-directory push context7-mcp --from=claude
 
-  ${ANSI.gray}# Link all skills to Claude Code and Antigravity:${ANSI.reset}
-  npx @imaimai86/skills-directory --skills=all --agents=claude,agy
+  ${ANSI.gray}# Auto-discover a skill across agents and push to git:${ANSI.reset}
+  skills-directory push context7-mcp
 
-  ${ANSI.gray}# Link specific skills without confirmation prompt:${ANSI.reset}
-  npx @imaimai86/skills-directory --skills=deepen,grill-me --agents=all --yes
+  ${ANSI.gray}# Backup and push from custom agent directory or path:${ANSI.reset}
+  skills-directory push my-skill --from=~/.cursor/skills
 
-  ${ANSI.gray}# Check status of installed agent skills:${ANSI.reset}
-  npx @imaimai86/skills-directory --status
+  ${ANSI.gray}# Interactive selection of skills across all agent runtimes:${ANSI.reset}
+  skills-directory push
 
-  ${ANSI.gray}# Unlink a skill:${ANSI.reset}
-  npx @imaimai86/skills-directory --unlink --skills=deepen --agents=claude
+  ${ANSI.gray}# Push with custom commit message and dry-run preview:${ANSI.reset}
+  skills-directory push deepen -m "feat: enhance prompt rigor" --dry-run
+
+  ${ANSI.gray}# Sync canonical skills into Claude and Antigravity:${ANSI.reset}
+  skills-directory --skills=all --agents=claude,agy
 `);
 }
 
+async function handlePushCommand({ positionals, values, dryRun, skipConfirm }) {
+  console.log(`\n${ANSI.bold}${ANSI.cyan}🚀 Skills Directory: Backup & Push to Repository${ANSI.reset}\n`);
+
+  if (dryRun) {
+    console.log(`${ANSI.yellow}${ANSI.bold}[DRY RUN MODE]${ANSI.reset} Simulating operations. No filesystem or git modifications.\n`);
+  }
+
+  const requestedSkillId = positionals[1] || values.skill || (values.skills && !values.skills.includes(',') ? values.skills : null);
+  const sourceAgentOrPath = values.from || null;
+  const customMessage = values.message || values.m || null;
+  const noPush = Boolean(values['no-push']);
+  const noSymlink = Boolean(values['no-symlink']);
+  const isAll = Boolean(values.all || (requestedSkillId && requestedSkillId.toLowerCase() === 'all'));
+
+  let skillsToProcess = [];
+
+  if (isAll) {
+    const allDiscovered = await discoverAgentSkills(PACKAGE_ROOT);
+    // Filter out duplicates if present across multiple agents, preferring physical-dir
+    const uniqueMap = new Map();
+    for (const item of allDiscovered) {
+      if (item.type === 'repo-symlink') continue; // already linked to repo and unmodified
+      if (!uniqueMap.has(item.skillId) || item.type === 'physical-dir') {
+        uniqueMap.set(item.skillId, item);
+      }
+    }
+    skillsToProcess = Array.from(uniqueMap.values());
+    if (skillsToProcess.length === 0) {
+      console.log(`${ANSI.yellow}No unmanaged or external skills found across agents to push.${ANSI.reset}\n`);
+      return;
+    }
+  } else if (requestedSkillId) {
+    const matches = await findSkill(requestedSkillId, sourceAgentOrPath, PACKAGE_ROOT);
+    if (matches.length === 0) {
+      console.error(`${ANSI.red}Error:${ANSI.reset} Skill "${requestedSkillId}" was not found${sourceAgentOrPath ? ` in ${sourceAgentOrPath}` : ' across any agent directories'}.`);
+      console.error(`${ANSI.gray}Tip: Specify --from=<agent|path> or use "skills-directory push" to see all available skills.${ANSI.reset}\n`);
+      process.exit(1);
+    }
+
+    if (matches.length === 1) {
+      skillsToProcess = [matches[0]];
+    } else {
+      // Multiple locations found
+      if (skipConfirm || !process.stdin.isTTY) {
+        // Pick physical directory first, or first item
+        const best = matches.find(m => m.type === 'physical-dir') || matches[0];
+        skillsToProcess = [best];
+      } else {
+        console.log(`Skill "${requestedSkillId}" was found in multiple locations:`);
+        const choices = matches.map((m, idx) => ({
+          id: String(idx),
+          label: `${m.agentName} (${m.type})`,
+          hint: m.skillPath,
+          selected: idx === 0
+        }));
+        const selectedIdx = await multiSelect('Choose which source to backup & push', choices);
+        if (selectedIdx.length === 0) {
+          console.log(`${ANSI.yellow}No source selected. Aborting.${ANSI.reset}`);
+          return;
+        }
+        skillsToProcess = selectedIdx.map(i => matches[parseInt(i, 10)]);
+      }
+    }
+  } else {
+    // Interactive multi-selection across agents and store
+    console.log(`${ANSI.gray}Scanning local agents for available skills...${ANSI.reset}`);
+    const allDiscovered = await discoverAgentSkills(PACKAGE_ROOT);
+
+    if (allDiscovered.length === 0) {
+      console.log(`${ANSI.yellow}No skills found in any local agent directories.${ANSI.reset}\n`);
+      return;
+    }
+
+    const items = allDiscovered.map(s => {
+      let badge = '';
+      if (s.type === 'physical-dir') badge = `${ANSI.magenta}[local folder]${ANSI.reset} `;
+      else if (s.type === 'external-symlink') badge = `${ANSI.yellow}[external link]${ANSI.reset} `;
+      else if (s.type === 'repo-symlink') badge = `${ANSI.gray}[repo link]${ANSI.reset} `;
+      else if (s.type === 'repo') badge = `${ANSI.cyan}[repo]${ANSI.reset} `;
+
+      return {
+        id: `${s.agentId}::${s.skillId}`,
+        label: `${s.skillId} ${badge}(${s.agentName})`,
+        hint: s.description ? s.description.slice(0, 60) : s.skillPath,
+        selected: s.type === 'physical-dir',
+        skillData: s
+      };
+    });
+
+    const selectedIds = await multiSelect('Select skill(s) to backup and push to repo', items);
+    if (selectedIds.length === 0) {
+      console.log(`${ANSI.yellow}No skills selected. Exiting.${ANSI.reset}\n`);
+      return;
+    }
+
+    skillsToProcess = items.filter(it => selectedIds.includes(it.id)).map(it => it.skillData);
+  }
+
+  // Display summary before confirmation
+  console.log(`\n${ANSI.bold}Selected skills to backup & push (${skillsToProcess.length}):${ANSI.reset}`);
+  console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}`);
+  for (const s of skillsToProcess) {
+    console.log(`  ${ANSI.bold}${ANSI.green}• ${s.skillId}${ANSI.reset} from ${ANSI.cyan}${s.agentName}${ANSI.reset}`);
+    console.log(`    ${ANSI.gray}Source:${ANSI.reset} ${ANSI.dim}${s.skillPath}${ANSI.reset}`);
+    console.log(`    ${ANSI.gray}Target:${ANSI.reset} ${ANSI.dim}${path.join(PACKAGE_ROOT, 'skills', s.skillId)}${ANSI.reset}`);
+  }
+  console.log(`${ANSI.gray}────────────────────────────────────────────────────────────────────────${ANSI.reset}`);
+  console.log(`${ANSI.bold}Options:${ANSI.reset} Git Push: ${noPush ? ANSI.yellow + 'Disabled (--no-push)' + ANSI.reset : ANSI.green + 'Enabled' + ANSI.reset} | Agent Symlink: ${noSymlink ? ANSI.yellow + 'Disabled (--no-symlink)' + ANSI.reset : ANSI.green + 'Enabled' + ANSI.reset}\n`);
+
+  if (!skipConfirm && !dryRun) {
+    const proceed = await confirm('Proceed with backup, repo import, and git push?', true);
+    if (!proceed) {
+      console.log(`\n${ANSI.yellow}Operation cancelled by user.${ANSI.reset}\n`);
+      return;
+    }
+  }
+
+  console.log(`\n${ANSI.bold}Executing backup & push operations...${ANSI.reset}\n`);
+
+  for (const skill of skillsToProcess) {
+    console.log(`${ANSI.bold}${ANSI.cyan}▶ Processing ${skill.skillId} (from ${skill.agentName}):${ANSI.reset}`);
+
+    try {
+      const result = await backupAndPushSkill(skill, {
+        from: sourceAgentOrPath,
+        repoRoot: PACKAGE_ROOT,
+        dryRun,
+        noPush,
+        noSymlink,
+        message: customMessage
+      });
+
+      // 1. Backup status
+      if (result.backupRes.status === 'backed-up') {
+        console.log(`  ${ANSI.magenta}📦 Backed up:${ANSI.reset} ${result.backupRes.backupDir}`);
+      } else if (result.backupRes.status === 'dry-run') {
+        console.log(`  ${ANSI.magenta}📦 [DRY RUN] Would backup to:${ANSI.reset} ${result.backupRes.backupDir}`);
+      }
+
+      // 2. Import status
+      if (result.importRes.status === 'imported') {
+        console.log(`  ${ANSI.green}✓ Imported to repo:${ANSI.reset} ${result.importRes.targetDir}`);
+      } else if (result.importRes.status === 'same-path') {
+        console.log(`  ${ANSI.gray}• Repo content already up to date${ANSI.reset}`);
+      } else if (result.importRes.status === 'dry-run') {
+        console.log(`  ${ANSI.green}✓ [DRY RUN] Would copy to:${ANSI.reset} ${result.importRes.targetDir}`);
+      }
+
+      // 3. Relink status
+      if (result.relinkRes.status === 'relinked') {
+        console.log(`  ${ANSI.green}🔗 Relinked agent:${ANSI.reset} ${result.relinkRes.linkPath} -> ${ANSI.dim}${result.relinkRes.target}${ANSI.reset}`);
+      } else if (result.relinkRes.status === 'dry-run') {
+        console.log(`  ${ANSI.green}🔗 [DRY RUN] Would relink:${ANSI.reset} ${result.relinkRes.linkPath} -> ${ANSI.dim}${result.relinkRes.target}${ANSI.reset}`);
+      }
+
+      // 4. Git status
+      const git = result.gitRes;
+      if (git.status === 'pushed') {
+        console.log(`  ${ANSI.green}✓ Committed:${ANSI.reset} "${git.commitMessage}" (${git.commitHash || 'HEAD'})`);
+        console.log(`  ${ANSI.bold}${ANSI.green}🚀 Successfully pushed to remote repository!${ANSI.reset}`);
+      } else if (git.status === 'committed') {
+        console.log(`  ${ANSI.green}✓ Committed locally:${ANSI.reset} "${git.commitMessage}" (${git.commitHash || 'HEAD'})`);
+        console.log(`  ${ANSI.gray}• Skipped push (--no-push)${ANSI.reset}`);
+      } else if (git.status === 'up-to-date') {
+        console.log(`  ${ANSI.gray}• Git working tree already clean & up to date${ANSI.reset}`);
+      } else if (git.status === 'push-failed') {
+        console.log(`  ${ANSI.green}✓ Committed locally:${ANSI.reset} "${git.commitMessage}" (${git.commitHash || 'HEAD'})`);
+        console.log(`  ${ANSI.yellow}⚠️  Git push encountered an issue:${ANSI.reset} ${git.error}`);
+        console.log(`  ${ANSI.gray}👉 You can push manually using: git push${ANSI.reset}`);
+      } else if (git.status === 'dry-run') {
+        console.log(`  ${ANSI.green}✓ [DRY RUN] Would stage & commit:${ANSI.reset} "${git.commitMessage}"`);
+        if (git.pushed) {
+          console.log(`  ${ANSI.green}🚀 [DRY RUN] Would git push to remote repository${ANSI.reset}`);
+        }
+      } else if (git.status === 'commit-failed') {
+        console.log(`  ${ANSI.red}✗ Git commit failed:${ANSI.reset} ${git.error}`);
+      }
+    } catch (err) {
+      console.error(`  ${ANSI.red}✗ Error processing ${skill.skillId}:${ANSI.reset} ${err.message}`);
+    }
+
+    console.log();
+  }
+
+  console.log(`${ANSI.green}${ANSI.bold}Backup and push workflow completed!${ANSI.reset}\n`);
+}
+
 async function main() {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     options: {
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
@@ -90,10 +302,19 @@ async function main() {
       'dry-run': { type: 'boolean', short: 'd' },
       unlink: { type: 'boolean', short: 'u' },
       yes: { type: 'boolean', short: 'y' },
+      push: { type: 'boolean', short: 'p' },
+      backup: { type: 'boolean', short: 'b' },
+      'no-push': { type: 'boolean' },
+      'no-symlink': { type: 'boolean' },
+      all: { type: 'boolean', short: 'a' },
+      from: { type: 'string', short: 'f' },
+      skill: { type: 'string' },
       skills: { type: 'string' },
       agents: { type: 'string' },
-      store: { type: 'string' }
+      store: { type: 'string' },
+      message: { type: 'string', short: 'm' }
     },
+    allowPositionals: true,
     strict: false
   });
 
@@ -106,6 +327,28 @@ async function main() {
     const v = await getPackageVersion();
     console.log(`skills-directory v${v}`);
     return;
+  }
+
+  const dryRun = Boolean(values['dry-run']);
+  const skipConfirm = Boolean(values.yes);
+
+  // Check for positional command shortcuts
+  const command = positionals[0] ? positionals[0].toLowerCase() : null;
+
+  if (command === 'push' || command === 'backup' || values.push || values.backup) {
+    await handlePushCommand({ positionals, values, dryRun, skipConfirm });
+    return;
+  }
+
+  if (command === 'status') {
+    values.status = true;
+  } else if (command === 'list') {
+    values.list = true;
+  } else if (command === 'unlink') {
+    values.unlink = true;
+  } else if (command === 'sync') {
+    values.skills = 'all';
+    values.agents = 'all';
   }
 
   const skillsDir = path.join(PACKAGE_ROOT, 'skills');
@@ -213,9 +456,7 @@ async function main() {
     }
   }
 
-  const dryRun = Boolean(values['dry-run']);
   const isUnlink = Boolean(values.unlink);
-  const skipConfirm = Boolean(values.yes);
 
   if (dryRun) {
     console.log(`${ANSI.yellow}${ANSI.bold}[DRY RUN MODE]${ANSI.reset} No disk modifications will occur.\n`);
@@ -265,7 +506,6 @@ async function main() {
   const selectedSkillsData = availableSkills.filter(s => selectedSkillIds.includes(s.id));
   for (const skill of selectedSkillsData) {
     console.log(`  ${ANSI.bold}${ANSI.green}• ${skill.id}${ANSI.reset}`);
-    // Wrap description cleanly
     const cleanDesc = skill.description.replace(/\n+/g, ' ').trim();
     console.log(`    ${ANSI.gray}${cleanDesc}${ANSI.reset}`);
     if (skill.argumentHint) {
