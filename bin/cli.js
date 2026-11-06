@@ -20,8 +20,14 @@ import {
   discoverAgentSkills,
   findSkill,
   backupAndPushSkill,
-  resolveSource
+  resolveSource,
+  commitAndPushSkill
 } from '../lib/backup-push.js';
+import {
+  discoverClaudeAccountSkills,
+  importClaudeAccountSkill,
+  linkClaudeAccountSkill
+} from '../lib/claude-account.js';
 import { multiSelect, confirm } from '../lib/prompt.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,13 +65,15 @@ ${ANSI.bold}USAGE:${ANSI.reset}
 
 ${ANSI.bold}COMMANDS:${ANSI.reset}
   push, backup [SKILL]        Backup, import, relink, and push a skill to repo from any agent
+  backup-account [SKILL]      Backup & import Claude account-synced skills into repo and link
   sync                        Sync all canonical skills to all supported agents
   status                      Show current installation and symlink status across agents
   unlink                      Unlink selected skills from selected agent paths
   list                        List all available canonical skills in repo
 
 ${ANSI.bold}OPTIONS:${ANSI.reset}
-  -f, --from=<agent|path>     Source agent (claude, agy, codex, cursor, etc.) or custom folder path
+  -f, --from=<agent|path>     Source agent (claude, claude-account, agy, codex, etc.) or custom path
+      --account               Target Claude account-synced skills (~/.claude/skills/synced/)
       --skill=<name>          Skill identifier to backup and push
   -m, --message=<msg>         Custom git commit message
       --no-push               Backup, import, and commit locally without pushing to git remote
@@ -292,6 +300,127 @@ async function handlePushCommand({ positionals, values, dryRun, skipConfirm }) {
   console.log(`${ANSI.green}${ANSI.bold}Backup and push workflow completed!${ANSI.reset}\n`);
 }
 
+async function handleBackupAccountCommand({ positionals, values, dryRun, skipConfirm }) {
+  console.log(`\n${ANSI.bold}${ANSI.cyan}☁️  Skills Directory: Claude Account Skills Backup & Sync${ANSI.reset}\n`);
+
+  if (dryRun) {
+    console.log(`${ANSI.yellow}${ANSI.bold}[DRY RUN MODE]${ANSI.reset} Simulating operations. No filesystem or git modifications.\n`);
+  }
+
+  const requestedSkillId = positionals[1] || values.skill || (values.skills && !values.skills.includes(',') ? values.skills : null);
+  const customMessage = values.message || values.m || null;
+  const noPush = Boolean(values['no-push']);
+  const noSymlink = Boolean(values['no-symlink']);
+
+  let targetAgents = ['claude', 'agy'];
+  if (values.agents) {
+    if (values.agents.toLowerCase() === 'all') {
+      targetAgents = Object.keys(AGENTS);
+    } else {
+      targetAgents = values.agents.split(',').map(s => s.trim().toLowerCase());
+    }
+  }
+
+  console.log(`${ANSI.gray}Scanning Claude account skills in ~/.claude/skills/synced/...${ANSI.reset}`);
+  const discovered = await discoverClaudeAccountSkills({
+    repoRoot: PACKAGE_ROOT,
+    skillId: requestedSkillId
+  });
+
+  if (discovered.length === 0) {
+    console.log(`${ANSI.yellow}No matching Claude account skills found in ~/.claude/skills/synced/.${ANSI.reset}\n`);
+    return;
+  }
+
+  console.log(`Found ${ANSI.bold}${discovered.length}${ANSI.reset} Claude account skill(s):\n`);
+  for (const s of discovered) {
+    const statusTag = s.inRepo
+      ? `${ANSI.yellow}[already central]${ANSI.reset}`
+      : `${ANSI.green}[new to import]${ANSI.reset}`;
+    console.log(`  • ${ANSI.bold}${s.skillId}${ANSI.reset} ${statusTag} ${ANSI.gray}- ${s.description.slice(0, 70)}${ANSI.reset}`);
+  }
+  console.log();
+
+  if (!skipConfirm && !dryRun) {
+    const proceed = await confirm(`Proceed with importing and linking ${discovered.length} Claude account skill(s)?`, true);
+    if (!proceed) {
+      console.log(`\n${ANSI.yellow}Operation cancelled by user.${ANSI.reset}\n`);
+      return;
+    }
+    console.log();
+  }
+
+  const repoSkillsDir = path.join(PACKAGE_ROOT, 'skills');
+
+  for (const skill of discovered) {
+    console.log(`${ANSI.bold}${ANSI.cyan}▶ Processing ${skill.skillId}:${ANSI.reset}`);
+
+    // 1. Import
+    const importRes = await importClaudeAccountSkill(skill, PACKAGE_ROOT, { dryRun });
+    if (importRes.status === 'skipped') {
+      console.log(`  ${ANSI.gray}• skipped ${skill.skillId} (already central)${ANSI.reset}`);
+    } else if (importRes.status === 'imported') {
+      if (importRes.dryRun) {
+        console.log(`  ${ANSI.green}✓ [DRY RUN] Would import ${skill.skillId} -> ${importRes.targetDir}${ANSI.reset}`);
+      } else {
+        console.log(`  ${ANSI.green}✓ imported ${skill.skillId}${ANSI.reset}`);
+      }
+    }
+
+    // 2. Link
+    if (!noSymlink) {
+      const canonicalSkillPath = path.join(repoSkillsDir, skill.skillId);
+      const linkResults = await linkClaudeAccountSkill(skill.skillId, canonicalSkillPath, targetAgents, { dryRun });
+      for (const res of linkResults) {
+        if (res.hasClash && res.agentKey === 'claude') {
+          console.log(`  ${ANSI.yellow}⚠️  "${skill.skillId}" also exists as a Claude account skill; delete it from the claude.ai account so only the central copy is used.${ANSI.reset}`);
+        }
+        if (res.status === 'linked') {
+          console.log(`  ${ANSI.green}✓ Linked in ${res.agentName}:${ANSI.reset} ${res.destPath} -> ${ANSI.dim}${res.target}${ANSI.reset}`);
+        } else if (res.status === 'already-linked') {
+          console.log(`  ${ANSI.gray}• Already linked in ${res.agentName}:${ANSI.reset} ${skill.skillId}`);
+        } else if (res.status === 'updated-link') {
+          console.log(`  ${ANSI.green}↻ Updated link in ${res.agentName}:${ANSI.reset} ${skill.skillId} -> ${ANSI.dim}${res.target}${ANSI.reset}`);
+        } else if (res.status === 'replaced-dir') {
+          console.log(`  ${ANSI.magenta}📦 Backed up directory:${ANSI.reset} ${res.backupPath}`);
+          console.log(`  ${ANSI.green}✓ Linked in ${res.agentName}:${ANSI.reset} ${skill.skillId} -> ${ANSI.dim}${res.target}${ANSI.reset}`);
+        }
+      }
+    }
+
+    // 3. Git commit & push
+    if (importRes.status === 'imported') {
+      const commitMsg = customMessage || `import ${skill.skillId} from claude account`;
+      const gitRes = await commitAndPushSkill(skill.skillId, PACKAGE_ROOT, {
+        message: commitMsg,
+        noPush,
+        dryRun,
+        agentName: 'claude account'
+      });
+
+      if (gitRes.status === 'pushed') {
+        console.log(`  ${ANSI.green}✓ Committed:${ANSI.reset} "${gitRes.commitMessage}" (${gitRes.commitHash || 'HEAD'})`);
+        console.log(`  ${ANSI.bold}${ANSI.green}🚀 Successfully pushed to remote repository!${ANSI.reset}`);
+      } else if (gitRes.status === 'committed') {
+        console.log(`  ${ANSI.green}✓ Committed locally:${ANSI.reset} "${gitRes.commitMessage}" (${gitRes.commitHash || 'HEAD'})`);
+        console.log(`  ${ANSI.gray}• Skipped push (--no-push)${ANSI.reset}`);
+      } else if (gitRes.status === 'dry-run') {
+        console.log(`  ${ANSI.green}✓ [DRY RUN] Would stage & commit:${ANSI.reset} "${gitRes.commitMessage}"`);
+        if (gitRes.pushed) {
+          console.log(`  ${ANSI.green}🚀 [DRY RUN] Would git push to remote repository${ANSI.reset}`);
+        }
+      } else if (gitRes.status === 'push-failed') {
+        console.log(`  ${ANSI.green}✓ Committed locally:${ANSI.reset} "${gitRes.commitMessage}"`);
+        console.log(`  ${ANSI.yellow}⚠️  Git push failed:${ANSI.reset} ${gitRes.error}`);
+      }
+    }
+
+    console.log();
+  }
+
+  console.log(`${ANSI.green}${ANSI.bold}Claude account skills sync completed!${ANSI.reset}\n`);
+}
+
 async function main() {
   const { values, positionals } = parseArgs({
     options: {
@@ -304,6 +433,7 @@ async function main() {
       yes: { type: 'boolean', short: 'y' },
       push: { type: 'boolean', short: 'p' },
       backup: { type: 'boolean', short: 'b' },
+      account: { type: 'boolean' },
       'no-push': { type: 'boolean' },
       'no-symlink': { type: 'boolean' },
       all: { type: 'boolean', short: 'a' },
@@ -334,6 +464,17 @@ async function main() {
 
   // Check for positional command shortcuts
   const command = positionals[0] ? positionals[0].toLowerCase() : null;
+
+  if (
+    command === 'backup-account' ||
+    command === 'sync-account' ||
+    command === 'import-account' ||
+    values.account ||
+    (values.from && (values.from.toLowerCase() === 'claude-account' || values.from.toLowerCase() === 'account'))
+  ) {
+    await handleBackupAccountCommand({ positionals, values, dryRun, skipConfirm });
+    return;
+  }
 
   if (command === 'push' || command === 'backup' || values.push || values.backup) {
     await handlePushCommand({ positionals, values, dryRun, skipConfirm });

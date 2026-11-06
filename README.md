@@ -13,6 +13,7 @@ Manage and synchronize your curated AI agent skills from a single canonical repo
   - [Quick Run Options](#quick-run-options)
   - [Headless / Scripted Mode](#headless--scripted-mode)
 - [Backup & Push Skills from Agents](#backup--push-skills-from-agents)
+- [Claude Account-Synced Skills Backup & Sync](#claude-account-synced-skills-backup--sync)
 - [Supported Coding Agents](#supported-coding-agents)
 - [Skills Catalog](#skills-catalog)
   - [deepen](#1-deepen)
@@ -181,6 +182,39 @@ skills-directory push context7-mcp --no-push
 Backup, import to repo, and push without replacing the agent's original physical folder with a symlink:
 ```bash
 skills-directory push context7-mcp --no-symlink
+```
+
+---
+
+## Claude Account-Synced Skills Backup & Sync
+
+Claude syncs skills saved to your `claude.ai` account into nested folders:
+```
+~/.claude/skills/synced/<org-id>_<id>/<skill-name>/SKILL.md
+```
+Claude overwrites these folders from your account, so they are **read-only sources**: never edit, delete, or symlink into them.
+
+The `backup-account` command provides a dedicated, safe workflow:
+1. **Recursive Discovery**: Finds skills inside `~/.claude/skills/synced/` (ignoring `.staging`, `.bucket-*`, `node_modules`).
+2. **Safe Import**: Copies skills into `skills/<name>/` **only** if they do not already exist centrally. Never overwrites central edits.
+3. **Cross-Agent Symlink**: Creates symlinks in target agent folders (AGY, Codex, etc.).
+4. **Collision Warning**: If a skill exists in both `synced/` and as a local link in Claude Code, warns:
+   `"<name> also exists as a Claude account skill; delete it from the claude.ai account so only the central copy is used."`
+5. **Git Push**: Automatically stages, commits with `"import <name> from claude account"`, and pushes upstream.
+
+### Usage
+```bash
+# Preview operations with dry-run
+skills-directory backup-account --dry-run
+
+# Import and link a specific skill (e.g. tailor-cv-for-job)
+skills-directory backup-account tailor-cv-for-job --yes
+
+# Import all account skills without interactive prompt
+skills-directory backup-account --yes
+
+# Or via npm script
+npm run backup:account -- --yes
 ```
 
 ---

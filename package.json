@@ -20,6 +20,8 @@
     "status": "node ./bin/cli.js --status",
     "push": "node ./bin/cli.js push",
     "backup": "node ./bin/cli.js backup",
+    "backup:account": "node ./bin/cli.js backup-account",
+    "sync:account": "node ./bin/cli.js backup-account",
     "test": "node --test test/*.test.js"
   },
   "repository": {
