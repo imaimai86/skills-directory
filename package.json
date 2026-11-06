@@ -18,7 +18,9 @@
     "start": "node ./bin/cli.js",
     "sync": "node ./bin/cli.js --skills=all --agents=all",
     "status": "node ./bin/cli.js --status",
-    "test": "node --test test/cli.test.js"
+    "push": "node ./bin/cli.js push",
+    "backup": "node ./bin/cli.js backup",
+    "test": "node --test test/*.test.js"
   },
   "repository": {
     "type": "git",

@@ -12,6 +12,7 @@ Manage and synchronize your curated AI agent skills from a single canonical repo
 - [Quick Start](#quick-start)
   - [Quick Run Options](#quick-run-options)
   - [Headless / Scripted Mode](#headless--scripted-mode)
+- [Backup & Push Skills from Agents](#backup--push-skills-from-agents)
 - [Supported Coding Agents](#supported-coding-agents)
 - [Skills Catalog](#skills-catalog)
   - [deepen](#1-deepen)
@@ -27,8 +28,10 @@ Manage and synchronize your curated AI agent skills from a single canonical repo
 ## Features
 
 - **Single Source of Truth**: All skills live in one canonical place (`skills/`). Updates or git pulls immediately reflect across Claude, Antigravity, and Codex.
+- **Two-Way Agent Push & Backup**: Effortlessly backup, adopt, and push skills created inside Claude Code, AGY, Codex, Cursor, Windsurf, or any custom agent folder directly into the repository and git remote.
+- **Automated Safety Backups**: Every imported or replaced skill is safely archived with an ISO timestamp into `~/.agents/backups/<agent>/<skill>-<timestamp>/` before anything is modified.
 - **Interactive Multi-Select with Previews**: Inspect skill details, descriptions, and target paths before confirming changes.
-- **Headless & Scriptable**: First-class CLI flags (`--skills`, `--agents`, `--status`, `--unlink`, `--dry-run`, `--yes`) for automated setups and dotfile management.
+- **Headless & Scriptable**: First-class CLI flags (`push`, `backup`, `--from`, `--message`, `--skills`, `--agents`, `--status`, `--unlink`, `--dry-run`, `--yes`) for automated setups and dotfile management.
 - **Persistent Cache Safeguard**: Automatically prevents broken symlinks when run via ephemeral `npx` caches by maintaining a stable user store at `~/.agents/skills/`.
 - **Protected Namespaces**: Respects tool-internal directories (safeguards `~/.claude/skills/synced/` and `~/.codex/skills/.system/`).
 - **Zero Runtime Dependencies**: Ultra-lightweight native Node.js ESM.
@@ -100,6 +103,88 @@ skills-directory --list
 
 ---
 
+## Backup & Push Skills from Agents
+
+When you build or modify a skill inside a specific agent runtime (Claude Code, Antigravity, Codex, Cursor, Windsurf, or any custom folder), you can backup, import it into the canonical repository, relink it so the agent immediately tracks the repo version, and push it directly to Git.
+
+### Commands & Aliases
+
+Both `push` and `backup` can be used interchangeably:
+
+```bash
+skills-directory push [skill-name] [options]
+skills-directory backup [skill-name] [options]
+```
+
+Or via `npm run`:
+```bash
+npm run push -- [skill-name] [options]
+npm run backup -- [skill-name] [options]
+```
+
+### Examples
+
+#### 1. Auto-Discovery Push
+Auto-detects where the skill exists across all known local agents (Claude, AGY, Codex, etc.), creates a safety backup, copies it to `skills/`, relinks the agent to the repo, commits, and pushes to Git remote:
+```bash
+skills-directory push context7-mcp
+```
+
+#### 2. Push from a Specific Agent
+Explicitly specify the source runtime using `--from` (or `-f`):
+```bash
+# From Claude Code (~/.claude/skills)
+skills-directory push context7-mcp --from=claude
+
+# From Antigravity / AGY (~/.gemini/config/skills)
+skills-directory push grill-me --from=agy
+
+# From Codex (~/.codex/skills)
+skills-directory push my-tool --from=codex
+
+# From Cursor (~/.cursor/skills) or Windsurf (~/.codeium/windsurf/skills)
+skills-directory push agent-search --from=cursor
+```
+
+#### 3. Push from Any Custom Directory or Coding Agent
+Support any agent runtime or arbitrary directory on your filesystem:
+```bash
+# Specify direct path
+skills-directory push custom-skill --from=~/.my-agent/skills
+
+# Direct path as argument
+skills-directory push /Volumes/Work/Projects/my-skills/custom-skill
+
+# Custom named agent format
+skills-directory push custom-skill --from=opencode=/opt/opencode/skills
+```
+
+#### 4. Interactive Mode
+Running `skills-directory push` without arguments interactively scans all installed agents, discovers unmanaged local folders, external symlinks, and repo skills, and lets you select which ones to process:
+```bash
+skills-directory push
+```
+
+#### 5. Custom Commit Message & Dry Run
+Preview all actions before touching files or git:
+```bash
+skills-directory push context7-mcp -m "feat(skills): add context7 mcp prompt" --dry-run
+```
+
+#### 6. Local Import Only (Without Remote Push)
+Backup, import into `skills/`, relink, and create a local Git commit without pushing upstream:
+```bash
+skills-directory push context7-mcp --no-push
+```
+
+#### 7. Keep Agent Source Intact (Without Relinking)
+Backup, import to repo, and push without replacing the agent's original physical folder with a symlink:
+```bash
+skills-directory push context7-mcp --no-symlink
+```
+
+---
+
 ## Supported Coding Agents
 
 | Agent | Discovery Path | Description |
@@ -107,6 +192,10 @@ skills-directory --list
 | **Claude Code** | `~/.claude/skills/` | Anthropic's Claude Code CLI |
 | **Antigravity (AGY)** | `~/.gemini/config/skills/` | Google Antigravity / AGY CLI |
 | **Codex** | `~/.codex/skills/` | Codex CLI |
+| **Cursor** | `~/.cursor/skills/` | Cursor IDE agent skills |
+| **Windsurf** | `~/.codeium/windsurf/skills/` | Codeium Windsurf IDE agent skills |
+| **Cline** | `~/.cline/skills/` | Cline VS Code extension skills |
+| **Any Custom Agent** | `--from=<path>` or `--from=name=<path>` | Any directory on your machine |
 
 ---
 
