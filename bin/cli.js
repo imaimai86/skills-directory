@@ -440,6 +440,7 @@ async function main() {
       from: { type: 'string', short: 'f' },
       skill: { type: 'string' },
       skills: { type: 'string' },
+      agent: { type: 'string' },
       agents: { type: 'string' },
       store: { type: 'string' },
       message: { type: 'string', short: 'm' }
@@ -536,14 +537,15 @@ async function main() {
 
   // Determine target skills
   let selectedSkillIds = [];
-  if (values.skills) {
-    if (values.skills.toLowerCase() === 'all') {
+  const rawSkills = values.skills || values.skill;
+  if (rawSkills) {
+    if (rawSkills.toLowerCase() === 'all') {
       selectedSkillIds = availableSkills.map(s => s.id);
     } else {
-      const requested = values.skills.split(',').map(s => s.trim().toLowerCase());
+      const requested = rawSkills.split(',').map(s => s.trim().toLowerCase());
       selectedSkillIds = availableSkills.filter(s => requested.includes(s.id.toLowerCase())).map(s => s.id);
       if (selectedSkillIds.length === 0) {
-        console.error(`${ANSI.red}Error:${ANSI.reset} No valid skills found matching "${values.skills}". Run --list to see available skills.`);
+        console.error(`${ANSI.red}Error:${ANSI.reset} No valid skills found matching "${rawSkills}". Run --list to see available skills.`);
         process.exit(1);
       }
     }
@@ -551,14 +553,15 @@ async function main() {
 
   // Determine target agents
   let selectedAgentKeys = [];
-  if (values.agents) {
-    if (values.agents.toLowerCase() === 'all') {
+  const rawAgents = values.agents || values.agent;
+  if (rawAgents) {
+    if (rawAgents.toLowerCase() === 'all') {
       selectedAgentKeys = Object.keys(AGENTS);
     } else {
-      const requested = values.agents.split(',').map(s => s.trim().toLowerCase());
+      const requested = rawAgents.split(',').map(s => s.trim().toLowerCase());
       selectedAgentKeys = Object.keys(AGENTS).filter(k => requested.includes(k));
       if (selectedAgentKeys.length === 0) {
-        console.error(`${ANSI.red}Error:${ANSI.reset} No valid agents found matching "${values.agents}". Choose from: claude, agy, codex, all.`);
+        console.error(`${ANSI.red}Error:${ANSI.reset} No valid agents found matching "${rawAgents}". Choose from: claude, agy, codex, all.`);
         process.exit(1);
       }
     }
