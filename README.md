@@ -226,6 +226,7 @@ npm run backup:account -- --yes
 | **Claude Code** | `~/.claude/skills/` | Anthropic's Claude Code CLI |
 | **Antigravity (AGY)** | `~/.gemini/config/skills/` | Google Antigravity / AGY CLI |
 | **Codex** | `~/.codex/skills/` | Codex CLI |
+| **OpenCode** | `~/.config/opencode/skills/` | OpenCode |
 | **Cursor** | `~/.cursor/skills/` | Cursor IDE agent skills |
 | **Windsurf** | `~/.codeium/windsurf/skills/` | Codeium Windsurf IDE agent skills |
 | **Cline** | `~/.cline/skills/` | Cline VS Code extension skills |

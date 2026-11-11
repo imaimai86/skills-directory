@@ -72,7 +72,7 @@ ${ANSI.bold}COMMANDS:${ANSI.reset}
   list                        List all available canonical skills in repo
 
 ${ANSI.bold}OPTIONS:${ANSI.reset}
-  -f, --from=<agent|path>     Source agent (claude, claude-account, agy, codex, etc.) or custom path
+  -f, --from=<agent|path>     Source agent (claude, claude-account, agy, codex, opencode, etc.) or custom path
       --account               Target Claude account-synced skills (~/.claude/skills/synced/)
       --skill=<name>          Skill identifier to backup and push
   -m, --message=<msg>         Custom git commit message
@@ -87,7 +87,7 @@ ${ANSI.bold}OPTIONS:${ANSI.reset}
   -d, --dry-run               Simulate actions without making filesystem or git modifications
   -y, --yes                   Skip interactive confirmation prompts
       --skills=<list|all>     Comma-separated list of skill IDs (or 'all')
-      --agents=<list|all>     Target agent runtimes: claude, agy, codex (or 'all')
+      --agents=<list|all>     Target agent runtimes: claude, agy, codex, opencode (or 'all')
       --store=<repo|persist>  Force source store: 'repo' (direct symlink) or 'persist' (~/.agents/skills)
   -h, --help                  Display this help message
   -v, --version               Display version information
@@ -561,7 +561,7 @@ async function main() {
       const requested = rawAgents.split(',').map(s => s.trim().toLowerCase());
       selectedAgentKeys = Object.keys(AGENTS).filter(k => requested.includes(k));
       if (selectedAgentKeys.length === 0) {
-        console.error(`${ANSI.red}Error:${ANSI.reset} No valid agents found matching "${rawAgents}". Choose from: claude, agy, codex, all.`);
+        console.error(`${ANSI.red}Error:${ANSI.reset} No valid agents found matching "${rawAgents}". Choose from: claude, agy, codex, opencode, all.`);
         process.exit(1);
       }
     }
