@@ -80,6 +80,33 @@ When done, have your result reviewed by another agent in a separate session, on 
 
 Keep each prompt the same size as the task. Depth goes into the criteria and the methods, not into extra deliverables.
 
+### Presenting several prompts
+With more than one lens, show the prompts side by side in a diff tool so the user can see where they differ. Always also print them in the reply (below), so nothing depends on the tool working.
+
+1. **Choose the tool.**
+   - If the user's arguments or conversation name a tool (for example "use meld", "use Beyond Compare"), use that one. If it is not installed, say so and fall through to detection.
+   - Otherwise detect what is installed with `command -v`, in this order: `meld`, `bcompare`, `kdiff3`, `opendiff` (macOS FileMerge), `code` (use `code --diff`), `vimdiff`, `delta`. Graphical tools come first because the user can scroll and merge in them.
+   - If several are found, use the first. Tell the user which you chose and that they can name another.
+   - If none are found, skip to the fallback.
+2. **Write the files.** Put each prompt in its own file in a new temporary directory (the session scratchpad if one is given, otherwise `mktemp -d`), named `<nn>-<role>-<level>.md`. Do not write them into the repo or the user's project. The files are editable: the user can copy parts between prompts, delete parts, or take one prompt whole, and what is saved in the files becomes the result.
+   - With two prompts, both panes are editable: tell the user to save the version they want in either file, or a hand-merged result in both. Do not create `final.md`.
+   - With three prompts, open all three files side by side (no `final.md`; a fourth file would not fit). Any pane can be edited. Tell the user to build the result in whichever file they prefer by copying parts from the others, and save it.
+   - With four prompts, open pairs (see step 3). Edits are made in whichever files the user chooses.
+3. **Open the tool.**
+   - Two prompts: pass both files. Three prompts: `meld`, `bcompare` and `kdiff3` take three files (`meld a b c`, `kdiff3 a b c`); with other tools, open the pairs 1–2 and 1–3 (or ask which pair to compare). Four prompts: open pairs against the first prompt, or two 2-way windows (1–2, 3–4), whichever the tool supports.
+   - Graphical tools block until closed, so run the tool command itself as a background task (the Bash tool's `run_in_background`), and do not wait. Do not wrap it in a shell `&` or a subshell: the task would then report "completed" as soon as the launcher exits, while the tool is still open. The task's completion notice is the signal that the tool was closed. If it ever arrives while the files are unchanged and the user has not said they are done, treat it as no change only after checking the tool process is gone (`pgrep -x <tool>`). Terminal tools (`vimdiff`, `delta`, `git diff --no-index`) cannot be shown interactively here, so print their output into the reply instead.
+   - Tell the user to save the files (not just edit them) and close the tool when they have decided. When the tool exits, or the user says they are done, go to "Read back and confirm".
+4. **Fallback (no tool, tool failed, or terminal-only tool).** Print each prompt in its own fenced block under its lens heading. Follow them with a compact table of what differs (role, level, raw material, methods, criteria, deliverable), and, if `diff` or `git diff --no-index --stat` is available, a short unified diff between the first and each other prompt.
+5. **Read back and confirm** (graphical tool only). Read every file again.
+   - If nothing changed, say so and carry on to the step 5 gate.
+   - If something changed, show a short summary of what moved (which sections were copied or removed, per file) and ask with AskUserQuestion which prompt to go with: each edited file by lens name, and **Use all edited prompts as they are**. Put the file with the most edits first (marked Recommended). The user can choose several if they want to run several.
+   - Check each chosen prompt still has Role, Goal, Start from, Methods, Out of scope, Acceptance criteria, Deliver and the Independent review block. If something was dropped, say what and ask whether to restore it from the original before running. Never run a prompt with the review block removed unless the user confirms. Do not rewrite the user's edits, and do not silently fix them.
+   - Chosen prompts replace the originals for the rest of the run. A prompt built from several lenses is treated as a Combine prompt for step 6; if it mixes lenses, the isolated-run option no longer applies to it.
+   - If the tool is closed without saving, treat that as no change.
+6. **Say what happened.** One line stating the tool used (or that none was available), and the directory holding the files so the user can reopen them.
+
+This applies to the Compare and Keep separate options in step 5. For Combine, show the merged prompt, and offer to open it against the separate prompts in the diff tool if the user wants to see what changed.
+
 ## 5. Gate
 With one lens, ask with AskUserQuestion (name the goal in the question):
 - **Run it**: execute the rewritten prompt here, now.
